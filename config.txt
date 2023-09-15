@@ -1,0 +1,4 @@
+host = "localhost"
+user = "root"
+password = "329567"
+db_name = "hr_3"

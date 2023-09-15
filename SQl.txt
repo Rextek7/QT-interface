@@ -1,0 +1,338 @@
+1)
+SELECT r.role_name AS role_name, COUNT(vc.id) AS candidate_count
+FROM vacancy v
+JOIN role r ON v.role_id = r.id
+LEFT JOIN vac_candid vc ON v.id = vc.vacancy_id
+GROUP BY r.role_name
+ORDER BY candidate_count DESC;
+
+2)
+SELECT l.location AS location_name, COUNT(v.id) AS vacancy_count
+
+FROM vacancy v
+
+JOIN location l ON v.location_id = l.id
+
+WHERE v.pause = 0 and v.status = 'актуально'
+
+GROUP BY l.location
+
+ORDER BY vacancy_count DESC;
+
+
+3)
+SELECT project_name, AVG(reject_count) AS среднее_количество
+FROM (
+SELECT project_name, COUNT(*) AS reject_count
+FROM project
+WHERE id IN (
+SELECT project_id
+FROM vacancy
+WHERE id IN (
+SELECT vacancy_id
+FROM offer
+WHERE accept = 0
+)
+)
+GROUP BY project_name
+) AS subquery
+GROUP BY project_name
+ORDER BY среднее_количество DESC;
+
+4)
+SELECT MIN(TIMESTAMPDIFF(SECOND, start_date, finish_date)) / 86400 AS min_time,
+       MAX(TIMESTAMPDIFF(SECOND, start_date, finish_date)) / 86400 AS max_time
+FROM vacancy;
+
+Резульат в днях. Ожидаемо min_time оказался отрицательным из-за автогенерации дат
+
+5)
+SELECT h.name,
+  GREATEST(COALESCE(SUM(CASE WHEN v.status = 'актуально' THEN 1 ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN v.status = 'не актуально' THEN 1 ELSE 0 END), 0)) AS max_count,
+  LEAST(COALESCE(SUM(CASE WHEN v.status = 'актуально' THEN 1 ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN v.status = 'не актуально' THEN 1 ELSE 0 END), 0)) AS min_count
+FROM vacancy v
+JOIN HR_ h ON v.hr_id = h.id
+GROUP BY h.id, h.name;
+6)
+таблица talentq	оказалась неверно заполнена. Оффер получили 1-30 candidate_id, в таблице talentq candidate_id начинается с 31
+
+WITH scores AS (
+SELECT candidate_id, verbal_test + numeric_test + prof_test AS total_score
+FROM talentq_check
+),
+filtered_candidates AS (
+SELECT s.total_score, s.candidate_id
+FROM offer o
+JOIN scores s ON o.candidate_id = s.candidate_id
+WHERE o.accept = 1
+)
+SELECT f.total_score, r.role_name FROM filtered_candidates f
+JOIN offer o ON f.candidate_id = o.candidate_id
+JOIN vacancy v ON o.vacancy_id = v.id
+JOIN role r ON v.role_id = r.id;
+
+7)
+-- Извлекаем месяц из start_date и считаем количество вакансий для каждого месяца
+WITH monthly_vacancies AS (
+  SELECT EXTRACT(MONTH FROM start_date) AS month, COUNT(*) AS vacancy_count
+  FROM vacancy
+  GROUP BY month
+)
+-- Используем HAVING для фильтрации по наибольшему и наименьшему количеству вакансий
+-- Выводим месяц и количество
+SELECT  CASE
+        WHEN month = 1 THEN 'Январь'
+        WHEN month = 2 THEN 'Февраль'
+        WHEN month = 3 THEN 'Март'
+        WHEN month = 4 THEN 'Апрель'
+        WHEN month = 5 THEN 'Май'
+        WHEN month = 6 THEN 'Июнь'
+        WHEN month = 7 THEN 'Июль'
+        WHEN month = 8 THEN 'Август'
+        WHEN month = 9 THEN 'Сентябрь'
+        WHEN month = 10 THEN 'Октябрь'
+        WHEN month = 11 THEN 'Ноябрь'
+        WHEN month = 12 THEN 'Декабрь'
+        ELSE 'Некорректный номер месяца'
+    END AS month, vacancy_count FROM monthly_vacancies
+HAVING vacancy_count IN (
+  SELECT MAX(vacancy_count) FROM monthly_vacancies
+  UNION
+  SELECT MIN(vacancy_count) FROM monthly_vacancies
+);
+
+
+
+
+8)
+SELECT g.value, gv.count
+FROM grade g,
+(SELECT grade_id, COUNT(*) AS count
+FROM vacancy
+GROUP BY grade_id) gv
+WHERE g.id = gv.grade_id
+ORDER BY gv.count DESC;
+
+9)
+-- Соединяем таблицы offer и candidate по candidate_id
+-- Используем INNER JOIN для того, чтобы остались только те candidate_id, которые есть в обоих таблицах
+WITH accepted_candidates AS (
+  SELECT c.id, c.past_work_id FROM offer o
+  INNER JOIN candidate c ON o.candidate_id = c.id
+)
+-- Считаем количество кандидатов для каждого past_work_id
+-- Соединяем таблицы past_work и accepted_candidates по past_work_id
+-- Выводим name и count
+SELECT p.name, COUNT(*) AS count FROM past_work p
+JOIN accepted_candidates a ON p.id = a.past_work_id
+GROUP BY p.name;
+
+10) 
+SELECT
+CASE
+WHEN candidate.name LIKE '%вна' THEN 'женщина'
+WHEN candidate.name LIKE '%вич' THEN 'мужчина'
+END AS пол,
+COUNT(*) AS количество
+FROM offer
+JOIN candidate ON offer.candidate_id = candidate.id
+GROUP BY пол;
+
+11)
+-- Считаем количество кандидатов для каждого source_id
+WITH source_candidates AS (
+  SELECT source_id, COUNT(*) AS count
+  FROM candidate
+  GROUP BY source_id
+)
+-- Соединяем таблицы source и source_candidates по source_id
+-- Выводим name
+-- Используем ORDER BY и LIMIT для получения топ 3 источников по убыванию количества кандидатов
+SELECT s.name FROM source s
+JOIN source_candidates sc ON s.id = sc.source_id
+ORDER BY count DESC
+LIMIT 3;
+
+12)
+-- Соединяем таблицы rejection и candidate по candidate_id
+-- Используем INNER JOIN для того, чтобы остались только те candidate_id, которые есть в обоих таблицах
+WITH rejected_candidates AS (
+  SELECT c.id, c.recruit_agency_id FROM rejection r
+  INNER JOIN candidate c ON r.candidate_id = c.id
+)
+-- Считаем количество отказов для каждого recruit_agency_id
+-- Соединяем таблицы recruit_agency и rejected_candidates по recruit_agency_id
+-- Выводим name
+-- Используем ORDER BY и LIMIT для получения агентства с наибольшим количеством отказов
+SELECT ra.name FROM recruit_agency ra
+JOIN rejected_candidates rc ON ra.id = rc.recruit_agency_id
+GROUP BY ra.name
+ORDER BY COUNT(*) DESC
+LIMIT 1;
+
+13)
+Так как даты сгенерированы, ответ имеет место быть
+
+-- Вычисляем разницу между result_date и send_date в днях для каждого candidate_id
+-- Используем DATEDIFF функцию для этого
+WITH check_duration AS (
+  SELECT candidate_id, DATEDIFF(result_date, send_date) AS days
+  FROM security_check
+)
+-- Находим среднее значение days
+-- Используем AVG функцию для этого
+SELECT AVG(days) AS average_time FROM check_duration;
+
+14)
+Кандидатов с более чем 1 оффером нет, поэтому HAVING count > 0
+
+-- Считаем количество офферов для каждого candidate_id
+-- Используем HAVING для того, чтобы отфильтровать те candidate_id, которые имеют больше одного оффера
+WITH multiple_offers AS (
+  SELECT candidate_id, COUNT(*) AS count
+  FROM offer
+  GROUP BY candidate_id
+  HAVING count > 0
+)
+-- Соединяем таблицы candidate и multiple_offers по candidate_id
+-- Выводим name и count
+SELECT c.name, m.count FROM candidate c
+JOIN multiple_offers m ON c.id = m.candidate_id;
+
+15)
+
+WITH accepted_vacancies AS (
+SELECT v.id, v.MVZ_id FROM offer o
+INNER JOIN vacancy v ON o.vacancy_id = v.id
+WHERE o.accept = 1 AND o.final_candid_date IS NOT NULL
+)
+SELECT m.MVZ FROM mvz m
+JOIN accepted_vacancies a ON m.id = a.MVZ_id
+GROUP BY m.MVZ
+ORDER BY COUNT(*) DESC
+LIMIT 1;
+
+
+16)
+SELECT initiator, reason, COUNT(*) AS count FROM rejection
+WHERE initiator = 'Кандидат'
+GROUP BY initiator, reason
+
+ORDER BY count DESC
+
+LIMIT 5;
+
+17)
+
+WITH day_of_week AS (
+  SELECT DAYOFWEEK(start_date) AS day_of_week, id FROM vacancy
+)
+SELECT
+  CASE
+    WHEN day_of_week = 1 THEN 'Воскресенье'
+    WHEN day_of_week = 2 THEN 'Понедельник'
+    WHEN day_of_week = 3 THEN 'Вторник'
+    WHEN day_of_week = 4 THEN 'Среда'
+    WHEN day_of_week = 5 THEN 'Четверг'
+    WHEN day_of_week = 6 THEN 'Пятница'
+    WHEN day_of_week = 7 THEN 'Суббота'
+  END AS day_of_week, COUNT(*) AS count FROM day_of_week
+GROUP BY day_of_week
+ORDER BY count DESC
+LIMIT 1;
+
+18)
+
+WITH RECURSIVE
+    offer_vacancy AS
+        (SELECT o.candidate_id, v.location_id
+         FROM offer o
+                  INNER JOIN vacancy v
+                             ON o.vacancy_id = v.id),
+
+    relocation AS (SELECT ov.location_id
+                   FROM offer_vacancy ov
+                            INNER JOIN candidate c
+                                       ON ov.candidate_id = c.id
+                   WHERE c.relocation_status = 'нужен')
+
+SELECT l.location AS location, COUNT(*) AS count
+FROM relocation r
+         LEFT JOIN location l ON r.location_id = l.id
+GROUP BY l.location;
+
+19)
+
+-- Находим самого старого кандидата
+SELECT 'Oldest Candidate' AS Category, role.role_name, candidate.name
+FROM candidate
+INNER JOIN (
+    SELECT offer.candidate_id, vacancy.role_id
+    FROM offer
+    INNER JOIN vacancy ON offer.vacancy_id = vacancy.id
+) AS temp ON candidate.id = temp.candidate_id
+INNER JOIN role ON temp.role_id = role.id
+WHERE candidate.birth_date = (
+    SELECT MIN(birth_date)
+    FROM candidate
+    WHERE candidate_id IN (
+        SELECT offer.candidate_id
+        FROM offer
+        INNER JOIN vacancy ON offer.vacancy_id = vacancy.id
+    )
+)
+UNION ALL
+-- Находим самого молодого кандидата
+SELECT 'Youngest Candidate' AS Category, role.role_name, candidate.name
+FROM candidate
+INNER JOIN (
+    SELECT offer.candidate_id, vacancy.role_id
+    FROM offer
+    INNER JOIN vacancy ON offer.vacancy_id = vacancy.id
+) AS temp ON candidate.id = temp.candidate_id
+INNER JOIN role ON temp.role_id = role.id
+WHERE candidate.birth_date = (SELECT MAX(birth_date)
+                              FROM candidate
+                              WHERE candidate.birth_date <= CURDATE()
+                                AND candidate_id IN (SELECT offer.candidate_id
+                                                     FROM offer
+                                                              INNER JOIN vacancy ON offer.vacancy_id = vacancy.id
+                                                     )
+                              );
+
+20)
+Для этого в таблице vacancy выбераем дату 2010.03.20. Затем все вакансии у которых finish_date < 2010.03.20 добавляем в колонку closed. Для остальных, если pause = 1 и если pause_finish > 2010.03.20, то добавляем их в колонку on_hold, остальные добавляем в open
+SELECT
+    CASE
+        WHEN finish_date < '2010-03-20' THEN 'colsed'
+        WHEN pause = 1 AND pause_finish > '2010-03-20' THEN 'ON_HOLD'
+        ELSE 'open'
+    END AS stat,
+    COUNT(*) AS vacancy_count
+FROM
+    vacancy
+GROUP BY
+    stat;
+
+
+21)
+
+WITH interviews AS (
+    SELECT
+        c.customer_name AS customer_name,
+        DATE(vac_candid.customer_date) AS interview_date,
+        COUNT(*) AS interview_count
+    FROM vac_candid
+    JOIN vacancy v ON vac_candid.vacancy_id = v.id
+    JOIN customer c ON v.customer_id = c.id
+    WHERE YEAR(vac_candid.customer_date) = 2023
+    GROUP BY c.customer_name, DATE(vac_candid.customer_date)
+)
+SELECT
+    customer_name,
+    interview_date,
+    SUM(interview_count) OVER (PARTITION BY customer_name ORDER BY interview_date) AS cumulative_interview_count
+FROM interviews
+ORDER BY customer_name, interview_date;
